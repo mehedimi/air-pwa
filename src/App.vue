@@ -84,7 +84,7 @@
         </li>
       </ul>
     </section>
-    <section class="fixed bottom-36 left-0 text-center w-full">
+    <section class="fixed bottom-10 left-0 text-center w-full">
       <button
         class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors"
         :class="{
