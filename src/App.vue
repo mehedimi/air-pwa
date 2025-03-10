@@ -64,7 +64,7 @@
         <li v-for="mode in modes">
           <button
             class="py-2 px-5 text-sm shadow-sm rounded-lg cursor-pointer hover:bg-gray-700 hover:text-gray-200"
-            @click="pwmResolution = mode.value"
+            @click="changePwm(mode.value)"
             :class="{
               'bg-gray-700 text-gray-200': pwmResolution === mode.value,
             }"
@@ -86,12 +86,13 @@
     </section>
     <section class="fixed bottom-10 left-0 text-center w-full">
       <button
+        v-if="isConnected"
         class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors"
         :class="{
           'bg-gray-700 text-gray-200': pwmResolution === 0,
           'hover:bg-gray-100 text-gray-700': pwmResolution !== 0,
         }"
-        @click="pwmResolution = 0"
+        @click="changePwm(0)"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -104,6 +105,17 @@
           />
         </svg>
       </button>
+      <button
+        v-else
+        class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors"
+        :class="{
+          'bg-gray-700 text-gray-200': pwmResolution === 0,
+          'hover:bg-gray-100 text-gray-700': pwmResolution !== 0,
+        }"
+        @click="connect"
+      >
+        Connect
+      </button>
     </section>
   </div>
 </template>
@@ -111,18 +123,22 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
+const serviceUuid = "d900dc08-7bb6-48e2-a26c-fd9d4182d290";
+const txUuid = "35211bb6-3c1d-4c8e-9144-74f4a5893962";
+const rxUuid = "36a77fc1-3e16-4632-9a50-d51a390b147a";
+
 const modes = [
   {
     title: "Low",
-    value: 256,
-  },
-  {
-    title: "Medium",
     value: 512,
   },
   {
+    title: "Medium",
+    value: 683,
+  },
+  {
     title: "High",
-    value: 768,
+    value: 853,
   },
   {
     title: "Full",
@@ -132,4 +148,43 @@ const modes = [
 
 const pwmResolution = ref(0);
 const rpm = ref(0);
+const isConnected = ref(false);
+
+let bleDevice;
+let rpmCharacteristic;
+let pwmCharacteristic;
+
+async function changePwm(resolution: number) {
+  if (!pwmCharacteristic) return;
+
+  pwmResolution.value = resolution;
+  let encoder = new TextEncoder();
+  await pwmCharacteristic.writeValue(encoder.encode(String(resolution)));
+}
+
+async function connect() {
+  const device = await navigator.bluetooth.requestDevice({
+    filters: [
+      {
+        name: "Mehedis Air Purifier",
+      },
+    ],
+    optionalServices: [serviceUuid],
+  });
+
+  bleDevice = await device.gatt.connect();
+  isConnected.value = true;
+
+  const service = await bleDevice.getPrimaryService(serviceUuid);
+
+  // Get RPM characteristic
+  rpmCharacteristic = await service.getCharacteristic(txUuid);
+  rpmCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
+    rpm.value = (event.target.value.getUint16(0, true) / 4)
+  });
+  await rpmCharacteristic.startNotifications();
+
+  // Get PWM characteristic
+  pwmCharacteristic = await service.getCharacteristic(rxUuid);
+}
 </script>
