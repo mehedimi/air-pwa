@@ -43,7 +43,7 @@ jobs:
           node-version: 20
           cache: "pnpm"
         env:
-          VITE_WS_URL: ${{ WS_URL }}
+          VITE_WS_URL: ${{ secrets.WS_URL }}
 
       - name: Install dependencies
         run: pnpm install
