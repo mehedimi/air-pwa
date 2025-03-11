@@ -4,19 +4,13 @@
       <h2 class="text-3xl font-semibold text-gray-600">Air Purifier</h2>
       <p class="text-gray-300 text-sm my-0.5">diy air purifier</p>
     </header>
-    <section class="flex items-center">
+    <section class="flex items-center justify-center">
       <svg
-        class="w-2/3 text-gray-700 -ml-8"
-        :class="{
-          'animate-[spin_2s_linear_infinite]': pwmResolution === modes[0].value,
-          'animate-[spin_1s_linear_infinite]': pwmResolution === modes[1].value,
-          'animate-[spin_600ms_linear_infinite]':
-            pwmResolution === modes[2].value,
-          'animate-[spin_400ms_linear_infinite]':
-            pwmResolution === modes[3].value,
-        }"
+        class="text-gray-700 -ml-8 w-4/5"
+        :class="pwmResolution ? 'animate-spin' : 'animate-none'"
         viewBox="0 0 2666 2666"
         xmlns="http://www.w3.org/2000/svg"
+        :style="{ animationDuration: fanSpeed + 'ms' }"
       >
         <g id="g8" transform="matrix(1.3333333,0,0,-1.3333333,0,2666.6667)">
           <g id="g10" transform="scale(0.1)">
@@ -53,18 +47,23 @@
           </g>
         </g>
       </svg>
-      <div class="text-center text-gray-600">
-        <h3 class="text-4xl">{{ rpm }}</h3>
-        <p class="text-left text-gray-300">RPM</p>
-      </div>
     </section>
     <section>
       <h3 class="text-2xl text-gray-500 font-semibold">Mode</h3>
+      <div class="mb-6 mt-3">
+        <input
+          v-model.number="pwmResolution"
+          class="w-full bg-gray-700"
+          type="range"
+          min="0"
+          max="1023"
+        />
+      </div>
       <ul class="my-4 flex space-x-3 text-center justify-center text-gray-400">
         <li v-for="mode in modes">
           <button
             class="py-2 px-5 text-sm shadow-sm rounded-lg cursor-pointer hover:bg-gray-700 hover:text-gray-200"
-            @click="changePwm(mode.value)"
+            @click="pwmResolution = mode.value"
             :class="{
               'bg-gray-700 text-gray-200': pwmResolution === mode.value,
             }"
@@ -86,13 +85,12 @@
     </section>
     <section class="fixed bottom-10 left-0 text-center w-full">
       <button
-        v-if="isConnected"
         class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors"
         :class="{
           'bg-gray-700 text-gray-200': pwmResolution === 0,
           'hover:bg-gray-100 text-gray-700': pwmResolution !== 0,
         }"
-        @click="changePwm(0)"
+        @click="pwmResolution = 0"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -105,27 +103,23 @@
           />
         </svg>
       </button>
+    </section>
+    <section
+      class="fixed text-center w-full h-full inset-0 flex items-center justify-center bg-gray-200/80"
+      v-if="!isConnected"
+    >
       <button
-        v-else
-        class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors"
-        :class="{
-          'bg-gray-700 text-gray-200': pwmResolution === 0,
-          'hover:bg-gray-100 text-gray-700': pwmResolution !== 0,
-        }"
-        @click="connect"
+        class="shadow px-20 py-4 rounded-full cursor-pointer transition-colors text-white bg-gray-700"
       >
-        Connect
+        Connecting...
       </button>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-
-const serviceUuid = "d900dc08-7bb6-48e2-a26c-fd9d4182d290";
-const txUuid = "35211bb6-3c1d-4c8e-9144-74f4a5893962";
-const rxUuid = "36a77fc1-3e16-4632-9a50-d51a390b147a";
+import { computed, ref, watch } from "vue";
+import { useDebounceFn } from "@vueuse/core";
 
 const modes = [
   {
@@ -147,44 +141,48 @@ const modes = [
 ];
 
 const pwmResolution = ref(0);
-const rpm = ref(0);
 const isConnected = ref(false);
+const fanSpeed = computed(() => {
+  const pwmValue = Math.max(0, Math.min(1023, pwmResolution.value));
 
-let bleDevice;
-let rpmCharacteristic;
-let pwmCharacteristic;
+  // Map PWM value (0-1023) to time range (400ms to 2000ms)
+  const minTime = 300; // Full speed (PWM = 1023)
+  const maxTime = 2000; // Lowest speed (PWM = 0)
 
-async function changePwm(resolution: number) {
-  if (!pwmCharacteristic) return;
+  // Calculate the time based on PWM value
+  return Math.ceil(minTime + ((maxTime - minTime) * (1023 - pwmValue)) / 1023);
+});
 
-  pwmResolution.value = resolution;
-  let encoder = new TextEncoder();
-  await pwmCharacteristic.writeValue(encoder.encode(String(resolution)));
+watch(
+  pwmResolution,
+  useDebounceFn(() => {
+    ws?.send(pwmResolution.value.toString());
+  }, 1000),
+);
+
+let ws: WebSocket | null = null;
+
+function connect() {
+  ws = new WebSocket(import.meta.env.VITE_WS_URL);
+  ws.onopen = () => {
+    isConnected.value = true;
+    ws?.send("PWM");
+  };
+
+  ws.onmessage = (e: MessageEvent) => {
+    pwmResolution.value = Number(e.data);
+  };
+
+  ws.onerror = (e) => {
+    isConnected.value = false;
+    console.error(e);
+  };
+
+  ws.onclose = () => {
+    isConnected.value = false;
+    setTimeout(connect, 1000);
+  };
 }
 
-async function connect() {
-  const device = await navigator.bluetooth.requestDevice({
-    filters: [
-      {
-        name: "Mehedis Air Purifier",
-      },
-    ],
-    optionalServices: [serviceUuid],
-  });
-
-  bleDevice = await device.gatt.connect();
-  isConnected.value = true;
-
-  const service = await bleDevice.getPrimaryService(serviceUuid);
-
-  // Get RPM characteristic
-  rpmCharacteristic = await service.getCharacteristic(txUuid);
-  rpmCharacteristic.addEventListener("characteristicvaluechanged", (event) => {
-    rpm.value = (event.target.value.getUint16(0, true) / 4)
-  });
-  await rpmCharacteristic.startNotifications();
-
-  // Get PWM characteristic
-  pwmCharacteristic = await service.getCharacteristic(rxUuid);
-}
+connect();
 </script>
