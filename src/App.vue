@@ -163,7 +163,7 @@ watch(
 let ws: WebSocket | null = null;
 
 function connect() {
-  ws = new WebSocket(import.meta.env.VITE_WS_URL);
+  ws = new WebSocket(import.meta.env.VITE_WS_URL + "/ws");
   ws.onopen = () => {
     isConnected.value = true;
     ws?.send("PWM");
